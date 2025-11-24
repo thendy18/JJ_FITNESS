@@ -1,10 +1,9 @@
-// src/app/login/page.tsx
 'use client'
 
 import React, { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import Image from 'next/image' // 1. Import Image
+import Image from 'next/image' 
 import { createClient } from '@/lib/supabase/client'
 import { Eye, EyeOff, Loader2 } from 'lucide-react'
 
@@ -30,6 +29,8 @@ export default function LoginPage() {
 
     try {
       const supabase = createClient()
+      
+      // Panggil signInWithPassword
       const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
         email: formData.email,
         password: formData.password,
@@ -38,6 +39,7 @@ export default function LoginPage() {
       if (authError) throw authError
 
       if (authData.user) {
+        // Ambil role user
         const { data: profileData, error: profileError } = await supabase
           .schema('members')
           .from('profiles')
@@ -45,18 +47,22 @@ export default function LoginPage() {
           .eq('id', authData.user.id)
           .single()
 
-        if (profileError) throw new Error('Gagal mengambil data profil.')
+        if (profileError) {
+             console.error("Profile fetch error:", profileError)
+             // Fallback jika profil belum ada/error, anggap member
+             router.push('/member')
+             return
+        }
 
-        setLoading(false)
-        
         if (profileData?.role === 'ADMIN') {
-          router.replace('/admin')
+          router.push('/admin')
         } else {
-          router.replace('/member')
+          router.push('/member')
         }
       }
 
     } catch (err: any) {
+      console.error("Login Error:", err)
       setErrorMsg(err.message || 'Email atau password salah.')
       setLoading(false)
     }
@@ -66,10 +72,9 @@ export default function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-black px-4 py-12">
       <div className="w-full max-w-md space-y-6 bg-[#000000] p-8 rounded-2xl shadow-2xl shadow-indigo-500/10 border border-gray-800">
         
-        {/* 2. LOGO AREA */}
+        {/* LOGO AREA */}
         <div className="flex justify-center mb-4">
           <div className="relative w-20 h-20">
-             {/* Pastikan ada file logo.png di folder public */}
              <Image 
                src="/logo.png" 
                alt="Logo Gym Master"
@@ -130,13 +135,13 @@ export default function LoginPage() {
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
+                suppressHydrationWarning={true}
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white transition-colors p-2 rounded-md hover:bg-gray-800"
               >
                 {showPassword ? <Eye size={20} /> : <EyeOff size={20} />}
               </button>
             </div>
             
-            {/* 3. LINK LUPA PASSWORD */}
             <div className="text-right px-1 pt-1">
               <Link href="/forgot-password" className="text-xs text-indigo-400 hover:text-indigo-300 hover:underline transition-colors">
                 Lupa Password?
