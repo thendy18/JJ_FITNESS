@@ -8,6 +8,8 @@ import {
   Loader2, Sun, CheckCircle, 
   CreditCard, Upload, LogOut, History, ChevronRight, ChevronLeft, Wifi
 } from 'lucide-react'
+import { FadeIn, SlideIn, ScaleIn, ScrollReveal } from '@/components/AnimatedSection'
+import { toast } from 'sonner'
 
 // --- TIPE DATA ---
 type Plan = {
@@ -130,12 +132,11 @@ export default function MemberDashboard() {
         })
       if (insertError) throw insertError
 
-      alert('Bukti berhasil dikirim!')
-      window.location.reload()
+      toast.success('✅ Bukti pembayaran berhasil dikirim!')
+      setTimeout(() => window.location.reload(), 1500)
 
     } catch (error: any) {
-      alert('Error: ' + error.message)
-    } finally {
+      toast.error(`❌ Error: ${error.message}`)
       setLoading(false)
     }
   }
@@ -174,8 +175,8 @@ export default function MemberDashboard() {
     <main className="min-h-screen bg-[#050505] text-white p-6 pb-24 font-sans selection:bg-indigo-500/30">
       
       {/* --- HEADER --- */}
-      <div className="flex justify-between items-center mb-8">
-        <div>
+      <FadeIn className="flex justify-between items-center mb-8">
+        <SlideIn>
             <div className="flex items-center gap-2 mb-1">
                 <Sun className="w-4 h-4 text-indigo-400" />
                 <span className="text-indigo-400 font-bold text-xs uppercase tracking-wider">
@@ -185,14 +186,16 @@ export default function MemberDashboard() {
             <h1 className="text-2xl font-bold text-white">
                 Hi, {user.name.split(' ')[0]}
             </h1>
-        </div>
+        </SlideIn>
+        <FadeIn delay={0.2}>
         <button onClick={handleLogout} className="p-3 bg-[#151515] rounded-full text-gray-400 hover:text-red-500 hover:bg-[#222] transition-all">
             <LogOut size={18} />
         </button>
-      </div>
+        </FadeIn>
+      </FadeIn>
 
       {/* --- EXCLUSIVE VIP MEMBER CARD --- */}
-      <div className="flex justify-center mb-12 perspective-1000">
+      <ScaleIn delay={0.3} className="flex justify-center mb-12 perspective-1000">
         <div className="relative w-full max-w-[400px] aspect-[1.58/1] group transition-transform duration-500 hover:scale-[1.02]">
             
             {/* Glow Effect Behind Card */}
@@ -258,10 +261,10 @@ export default function MemberDashboard() {
 
             </div>
         </div>
-      </div>
+      </ScaleIn>
 
       {/* --- PLAN CAROUSEL --- */}
-      <div className="mb-10">
+      <ScrollReveal className="mb-10">
         <div className="flex justify-between items-end mb-4 px-1">
             <h2 className="text-lg font-bold text-white flex items-center gap-2">
                 <CreditCard className="w-5 h-5 text-indigo-500" />
@@ -316,11 +319,11 @@ export default function MemberDashboard() {
                 </div>
             ))}
         </div>
-      </div>
+      </ScrollReveal>
 
       {/* --- FORM UPLOAD --- */}
       {selectedPlan && (
-        <div className="bg-[#0A0A0A] border border-indigo-500/30 rounded-2xl p-6 mb-10 animate-in fade-in slide-in-from-bottom-4 shadow-2xl shadow-black">
+        <FadeIn className="bg-[#0A0A0A] border border-indigo-500/30 rounded-2xl p-6 mb-10 shadow-2xl shadow-black">
             <h3 className="text-white font-bold mb-1">Konfirmasi & Bayar</h3>
             <p className="text-gray-500 text-xs mb-4">Upload bukti transfer untuk paket <span className="text-indigo-400">{selectedPlan.name}</span></p>
             
@@ -358,11 +361,11 @@ export default function MemberDashboard() {
                     </button>
                 </div>
             </form>
-        </div>
+        </FadeIn>
       )}
 
       {/* --- RIWAYAT TRANSAKSI --- */}
-      <div>
+      <ScrollReveal>
         <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
             <History className="w-5 h-5 text-gray-400" /> Riwayat Transaksi
         </h3>
@@ -393,7 +396,7 @@ export default function MemberDashboard() {
                 ))
             )}
         </div>
-      </div>
+      </ScrollReveal>
       
     </main>
   )

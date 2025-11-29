@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 // 1. Import font Inter dari google
 import { Inter } from "next/font/google"; 
 import "./globals.css";
+import { Toaster } from 'sonner'
 
 // 2. Konfigurasi font (subsets: latin wajib biar support bahasa inggris/indonesia)
 const inter = Inter({ subsets: ["latin"] });
@@ -23,6 +24,7 @@ export default function RootLayout({
       {/* Dengan begini, SELURUH aplikasi kamu otomatis pakai font Inter */}
       <body className={inter.className}>
         {children}
+        <Toaster position="top-right" richColors closeButton />
       </body>
     </html>
   );

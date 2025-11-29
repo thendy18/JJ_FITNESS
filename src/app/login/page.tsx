@@ -6,6 +6,7 @@ import Link from 'next/link'
 import Image from 'next/image' 
 import { createClient } from '@/lib/supabase/client'
 import { Eye, EyeOff, Loader2 } from 'lucide-react'
+import { FadeIn, ScaleIn } from '@/components/AnimatedSection'
 
 export default function LoginPage() {
   const router = useRouter()
@@ -70,10 +71,10 @@ export default function LoginPage() {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-black px-4 py-12">
-      <div className="w-full max-w-md space-y-6 bg-[#000000] p-8 rounded-2xl shadow-2xl shadow-indigo-500/10 border border-gray-800">
+      <FadeIn className="w-full max-w-md space-y-6 bg-[#000000] p-8 rounded-2xl shadow-2xl shadow-indigo-500/10 border border-gray-800">
         
         {/* LOGO AREA */}
-        <div className="flex justify-center mb-4">
+        <ScaleIn delay={0.2} className="flex justify-center mb-4">
           <div className="relative w-20 h-20">
              <Image 
                src="/logo.png" 
@@ -83,26 +84,27 @@ export default function LoginPage() {
                priority
              />
           </div>
-        </div>
+        </ScaleIn>
 
-        <div className="text-center space-y-2">
+        <FadeIn delay={0.3} className="text-center space-y-2">
           <h2 className="text-3xl font-extrabold text-white tracking-tight">
             Welcome Back
           </h2>
           <p className="text-gray-400 text-sm">
             Sign in to continue your journey
           </p>
-        </div>
+        </FadeIn>
 
         {errorMsg && (
-          <div className="p-4 text-sm text-red-200 bg-red-900/20 border border-red-900 rounded-xl flex items-center gap-2 animate-pulse">
+          <FadeIn className="p-4 text-sm text-red-200 bg-red-900/20 border border-red-900 rounded-xl flex items-center gap-2 animate-pulse">
             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
               <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
             </svg>
             {errorMsg}
-          </div>
+          </FadeIn>
         )}
 
+        <FadeIn delay={0.4}>
         <form onSubmit={handleLogin} className="space-y-5">
           
           <div className="space-y-1">
@@ -171,7 +173,8 @@ export default function LoginPage() {
             </Link>
           </p>
         </form>
-      </div>
+        </FadeIn>
+      </FadeIn>
     </div>
   )
 }

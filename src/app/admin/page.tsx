@@ -1,4 +1,3 @@
-export const dynamic = 'force-dynamic'
 'use client'
 
 import { createClient } from '@/lib/supabase/client'
@@ -11,7 +10,12 @@ import {
   Edit, Trash2, PlusCircle, ChevronLeft, ChevronRight, Download, ChevronDown
 } from 'lucide-react'
 import { createMember, deleteMember, extendMemberManual, updateMemberFull } from './actions'
-import Papa from 'papaparse' 
+import Papa from 'papaparse'
+import { FadeIn, SlideIn, ScaleIn, ScrollReveal } from '@/components/AnimatedSection'
+import DashboardAnalytics from '@/components/DashboardAnalytics'
+import ExpiringMembers from '@/components/ExpiringMembers'
+import { differenceInDays, subMonths, format } from 'date-fns'
+import { toast } from 'sonner' 
 
 // --- TIPE DATA ---
 type Transaction = {
@@ -59,7 +63,7 @@ export default function AdminDashboard() {
   const supabase = createClient()
 
   // --- STATE ---
-  const [activeTab, setActiveTab] = useState<'overview' | 'members'>('overview')
+  const [activeTab, setActiveTab] = useState<'analytics' | 'overview' | 'members'>('analytics')
   const [loading, setLoading] = useState(true)
   
   // STATE TANGGAL & PICKER
@@ -86,6 +90,10 @@ export default function AdminDashboard() {
   const [createAmount, setCreateAmount] = useState(0) 
   const [extendDays, setExtendDays] = useState(30)
   const [manualPrice, setManualPrice] = useState(0)
+
+  // Analytics State
+  const [analyticsData, setAnalyticsData] = useState<any>(null)
+  const [expiringMembers, setExpiringMembers] = useState<any[]>([])
 
   // --- FETCH DATA ---
   const fetchData = async () => {
@@ -125,7 +133,108 @@ export default function AdminDashboard() {
     const { data: plansData } = await supabase.schema('members').from('plans').select('*').eq('is_active', true)
     if (plansData) setAvailablePlans(plansData)
 
+    // 4. Analytics Data (6 bulan terakhir)
+    await fetchAnalyticsData()
+
+    // 5. Expiring Members (5 hari ke depan)
+    await fetchExpiringMembers()
+
     setLoading(false)
+  }
+
+  const fetchAnalyticsData = async () => {
+    // Gunakan currentDate sebagai base, bukan new Date()
+    const months = []
+    for (let i = 5; i >= 0; i--) {
+      const date = subMonths(currentDate, i)
+      months.push({
+        start: new Date(date.getFullYear(), date.getMonth(), 1).toISOString(),
+        end: new Date(date.getFullYear(), date.getMonth() + 1, 0, 23, 59, 59).toISOString(),
+        label: format(date, 'MMM yy')
+      })
+    }
+
+    const monthlyRevenue = []
+    const memberGrowth = []
+    let prevMonthRevenue = 0
+    let prevMonthMembers = 0
+
+    for (const month of months) {
+      // Revenue per bulan
+      const { data: trxData } = await supabase
+        .schema('members')
+        .from('transactions')
+        .select('amount')
+        .eq('status', 'APPROVED')
+        .gte('created_at', month.start)
+        .lte('created_at', month.end)
+      
+      const revenue = trxData?.reduce((sum, t) => sum + t.amount, 0) || 0
+      monthlyRevenue.push({ month: month.label, revenue })
+
+      // Member baru per bulan
+      const { data: newMembers } = await supabase
+        .schema('members')
+        .from('profiles')
+        .select('id')
+        .gte('created_at', month.start)
+        .lte('created_at', month.end)
+
+      const { count: totalMembers } = await supabase
+        .schema('members')
+        .from('profiles')
+        .select('*', { count: 'exact', head: true })
+        .lte('created_at', month.end)
+
+      memberGrowth.push({ 
+        month: month.label, 
+        new: newMembers?.length || 0,
+        total: totalMembers || 0
+      })
+
+      if (month.label === months[months.length - 2].label) {
+        prevMonthRevenue = revenue
+        prevMonthMembers = totalMembers || 0
+      }
+    }
+
+    const currentRevenue = monthlyRevenue[monthlyRevenue.length - 1]?.revenue || 0
+    const currentMembers = memberGrowth[memberGrowth.length - 1]?.total || 0
+    const revenueGrowth = prevMonthRevenue > 0 ? ((currentRevenue - prevMonthRevenue) / prevMonthRevenue) * 100 : 0
+    const memberGrowthPercent = prevMonthMembers > 0 ? ((currentMembers - prevMonthMembers) / prevMonthMembers) * 100 : 0
+
+    setAnalyticsData({
+      monthlyRevenue,
+      memberGrowth,
+      stats: {
+        totalRevenue: currentRevenue,
+        revenueGrowth,
+        totalMembers: currentMembers,
+        memberGrowth: memberGrowthPercent,
+        avgRevenue: currentMembers > 0 ? currentRevenue / currentMembers : 0
+      }
+    })
+  }
+
+  const fetchExpiringMembers = async () => {
+    const today = new Date()
+    const fiveDaysLater = new Date()
+    fiveDaysLater.setDate(today.getDate() + 5)
+
+    const { data } = await supabase
+      .schema('members')
+      .from('profiles')
+      .select('id, name, email, phone_number, expired_at')
+      .eq('is_active', true)
+      .lte('expired_at', fiveDaysLater.toISOString())
+      .order('expired_at', { ascending: true })
+
+    const membersWithDays = data?.map(m => ({
+      ...m,
+      daysLeft: differenceInDays(new Date(m.expired_at), today)
+    })) || []
+
+    setExpiringMembers(membersWithDays)
   }
 
   useEffect(() => { fetchData() }, [currentDate])
@@ -170,11 +279,12 @@ export default function AdminDashboard() {
   }, [isAddingMember, editingMember])
 
   const handleExportCSV = async () => {
-    if (!confirm('Download laporan?')) return
-    const startOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1).toISOString()
-    const endOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0, 23, 59, 59).toISOString()
-    const { data: reportData } = await supabase.schema('members').from('transactions').select(`created_at, amount, status, proof_url, profiles(name, email, expired_at), plans(name)`).eq('status', 'APPROVED').gte('created_at', startOfMonth).lte('created_at', endOfMonth).order('created_at', { ascending: true })
-    if (!reportData || reportData.length === 0) { alert('Tidak ada data transaksi sukses.'); return }
+    toast.promise(
+      (async () => {
+        const startOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1).toISOString()
+        const endOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0, 23, 59, 59).toISOString()
+        const { data: reportData } = await supabase.schema('members').from('transactions').select(`created_at, amount, status, proof_url, profiles(name, email, expired_at), plans(name)`).eq('status', 'APPROVED').gte('created_at', startOfMonth).lte('created_at', endOfMonth).order('created_at', { ascending: true })
+        if (!reportData || reportData.length === 0) throw new Error('Tidak ada data transaksi sukses')
     const csvData = reportData.map((trx: any) => {
         let paketName = trx.plans?.name || '-';
         if (trx.proof_url?.includes('MANUAL')) paketName = 'Manual (Cash)';
@@ -189,42 +299,146 @@ export default function AdminDashboard() {
     })
     const total = reportData.reduce((sum, t) => sum + t.amount, 0)
     csvData.push({ 'Tanggal': '', 'Nama': '', 'Email': '', 'Paket': 'TOTAL', 'Nominal': total, 'Status': '' } as any)
-    const csv = Papa.unparse(csvData)
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url; link.setAttribute('download', `Laporan_${currentDate.toLocaleDateString('id-ID', {month: 'long', year: 'numeric'})}.csv`)
-    document.body.appendChild(link); link.click(); document.body.removeChild(link)
+        const csv = Papa.unparse(csvData)
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+        const url = URL.createObjectURL(blob)
+        const link = document.createElement('a')
+        link.href = url; link.setAttribute('download', `Laporan_${currentDate.toLocaleDateString('id-ID', {month: 'long', year: 'numeric'})}.csv`)
+        document.body.appendChild(link); link.click(); document.body.removeChild(link)
+      })(),
+      {
+        loading: 'Mengunduh laporan...',
+        success: 'Laporan berhasil diunduh!',
+        error: (err) => err.message || 'Gagal mengunduh laporan'
+      }
+    )
   }
 
   // Actions
   const handleApprove = async (trxId: string) => {
-    if (!confirm('Setujui?')) return; setProcessingId(trxId)
-    try { await supabase.rpc('approve_payment', { target_transaction_id: trxId }); alert('Berhasil!'); fetchData() } catch (err: any) { alert('Gagal: ' + err.message) } finally { setProcessingId(null) }
+    setProcessingId(trxId)
+    toast.promise(
+      (async () => {
+        const { error } = await supabase.rpc('approve_payment', { target_transaction_id: trxId })
+        if (error) throw error
+        return true
+      })(),
+      {
+        loading: 'Memproses...',
+        success: () => { fetchData(); setProcessingId(null); return '✅ Transaksi disetujui!' },
+        error: (err) => { setProcessingId(null); return `❌ Gagal: ${err.message}` }
+      }
+    )
   }
   const handleReject = async (trxId: string) => {
-    if (!confirm('Tolak?')) return; setProcessingId(trxId)
-    try { await supabase.schema('members').from('transactions').update({ status: 'REJECTED', updated_at: new Date().toISOString() }).eq('id', trxId); fetchData() } catch (err: any) { alert('Gagal: ' + err.message) } finally { setProcessingId(null) }
+    setProcessingId(trxId)
+    toast.promise(
+      (async () => {
+        const { error } = await supabase.schema('members').from('transactions').update({ status: 'REJECTED', updated_at: new Date().toISOString() }).eq('id', trxId)
+        if (error) throw error
+        return true
+      })(),
+      {
+        loading: 'Memproses...',
+        success: () => { fetchData(); setProcessingId(null); return '❌ Transaksi ditolak' },
+        error: (err) => { setProcessingId(null); return `Gagal: ${err.message}` }
+      }
+    )
   }
   const handleDeleteMember = async (id: string) => {
-    if (!confirm('Hapus permanen?')) return; 
-    const result = await deleteMember(id); if (result?.error) alert('Gagal: ' + result.error); else { alert('Dihapus.'); fetchData() }
+    toast.promise(
+      deleteMember(id),
+      {
+        loading: 'Menghapus member...',
+        success: (result) => { 
+          if (result?.error) throw new Error(result.error)
+          fetchData()
+          return '🗑️ Member berhasil dihapus'
+        },
+        error: (err) => `Gagal: ${err.message}`
+      }
+    )
   }
   const handleUpdateMemberFull = async (formData: FormData) => {
-    const result = await updateMemberFull(formData); if (result?.error) alert('Gagal: ' + result.error); else { alert('Sukses!'); setEditingMember(null); fetchData() }
+    toast.promise(
+      updateMemberFull(formData),
+      {
+        loading: 'Menyimpan perubahan...',
+        success: (result) => {
+          if (result?.error) throw new Error(result.error)
+          setEditingMember(null)
+          fetchData()
+          return '✅ Data member berhasil diupdate!'
+        },
+        error: (err) => `Gagal: ${err.message}`
+      }
+    )
   }
   const handleCreateMember = async (formData: FormData) => {
-    const result = await createMember(formData); if (result?.error) alert('Gagal: ' + result.error); else { alert('Sukses!'); setIsAddingMember(false); fetchData() }
+    toast.promise(
+      createMember(formData),
+      {
+        loading: 'Membuat member baru...',
+        success: (result) => {
+          if (result?.error) throw new Error(result.error)
+          setIsAddingMember(false)
+          fetchData()
+          return '✅ Member baru berhasil dibuat!'
+        },
+        error: (err) => `Gagal: ${err.message}`
+      }
+    )
   }
   const handleManualExtend = async (e: React.FormEvent) => {
-    e.preventDefault(); if (!extendingMember) return;
-    const result = await extendMemberManual(extendingMember.id, extendDays, manualPrice);
-    if (result?.error) alert(result.error); else { alert('Berhasil!'); setExtendingMember(null); setManualPrice(0); fetchData() }
+    e.preventDefault()
+    if (!extendingMember) return
+    toast.promise(
+      extendMemberManual(extendingMember.id, extendDays, manualPrice),
+      {
+        loading: 'Memperpanjang membership...',
+        success: (result) => {
+          if (result?.error) throw new Error(result.error)
+          setExtendingMember(null)
+          setManualPrice(0)
+          fetchData()
+          return '💰 Membership berhasil diperpanjang!'
+        },
+        error: (err) => err.message || 'Gagal perpanjang membership'
+      }
+    )
   }
   const handleUpdateProfile = async (e: React.FormEvent) => {
-    e.preventDefault(); if (!editingMember) return;
-    const { error } = await supabase.schema('members').from('profiles').update({ name: editingMember.name, phone_number: editingMember.phone_number, member_type: editingMember.member_type }).eq('id', editingMember.id);
-    if (error) alert(error.message); else { alert('Updated!'); setEditingMember(null); fetchData() }
+    e.preventDefault()
+    if (!editingMember) return
+    toast.promise(
+      (async () => {
+        const { error } = await supabase.schema('members').from('profiles').update({ name: editingMember.name, phone_number: editingMember.phone_number, member_type: editingMember.member_type }).eq('id', editingMember.id)
+        if (error) throw error
+        return true
+      })(),
+      {
+        loading: 'Menyimpan...',
+        success: () => { setEditingMember(null); fetchData(); return '✅ Profil berhasil diupdate!' },
+        error: (err) => `Gagal: ${err.message}`
+      }
+    )
+  }
+  
+  // Quick Action Handler untuk Expiring Members
+  const handleQuickExtend = (member: any) => {
+    setExtendingMember({
+      id: member.id,
+      name: member.name,
+      email: member.email,
+      phone_number: member.phone_number,
+      role: 'USER',
+      is_active: true,
+      expired_at: member.expired_at,
+      member_type: 'Reguler',
+      created_at: new Date().toISOString()
+    })
+    setExtendDays(30)
+    setManualPrice(0)
   }
   const handleLogout = async () => { await supabase.auth.signOut(); router.push('/login') }
   const filteredMembers = members.filter(m => {
@@ -244,15 +458,17 @@ export default function AdminDashboard() {
           </div>
           <div className="flex items-center gap-4">
              <div className="hidden md:flex bg-[#111] p-1 rounded-lg border border-[#222]">
+                <button onClick={() => setActiveTab('analytics')} className={`px-4 py-2 text-sm font-bold rounded-md transition-all ${activeTab === 'analytics' ? 'bg-[#222] text-white shadow' : 'text-gray-500 hover:text-gray-300'}`}>Analytics</button>
                 <button onClick={() => setActiveTab('overview')} className={`px-4 py-2 text-sm font-bold rounded-md transition-all ${activeTab === 'overview' ? 'bg-[#222] text-white shadow' : 'text-gray-500 hover:text-gray-300'}`}>Overview</button>
-                <button onClick={() => setActiveTab('members')} className={`px-4 py-2 text-sm font-bold rounded-md transition-all ${activeTab === 'members' ? 'bg-[#222] text-white shadow' : 'text-gray-500 hover:text-gray-300'}`}>Manajemen Member</button>
+                <button onClick={() => setActiveTab('members')} className={`px-4 py-2 text-sm font-bold rounded-md transition-all ${activeTab === 'members' ? 'bg-[#222] text-white shadow' : 'text-gray-500 hover:text-gray-300'}`}>Members</button>
              </div>
              <button onClick={handleLogout} className="p-2 hover:bg-red-900/20 text-gray-400 hover:text-red-500 rounded-lg transition-colors" suppressHydrationWarning={true}><LogOut size={20} /></button>
           </div>
         </div>
-        <div className="md:hidden flex border-t border-[#222]">
-            <button onClick={() => setActiveTab('overview')} className={`flex-1 py-3 text-sm font-bold ${activeTab === 'overview' ? 'text-indigo-400 border-b-2 border-indigo-400' : 'text-gray-500'}`}>Overview</button>
-            <button onClick={() => setActiveTab('members')} className={`flex-1 py-3 text-sm font-bold ${activeTab === 'members' ? 'text-indigo-400 border-b-2 border-indigo-400' : 'text-gray-500'}`}>Members</button>
+        <div className="md:hidden flex border-t border-[#222] overflow-x-auto">
+            <button onClick={() => setActiveTab('analytics')} className={`flex-1 min-w-[100px] py-3 text-sm font-bold whitespace-nowrap ${activeTab === 'analytics' ? 'text-indigo-400 border-b-2 border-indigo-400' : 'text-gray-500'}`}>📊 Analytics</button>
+            <button onClick={() => setActiveTab('overview')} className={`flex-1 min-w-[100px] py-3 text-sm font-bold whitespace-nowrap ${activeTab === 'overview' ? 'text-indigo-400 border-b-2 border-indigo-400' : 'text-gray-500'}`}>📋 Overview</button>
+            <button onClick={() => setActiveTab('members')} className={`flex-1 min-w-[100px] py-3 text-sm font-bold whitespace-nowrap ${activeTab === 'members' ? 'text-indigo-400 border-b-2 border-indigo-400' : 'text-gray-500'}`}>👥 Members</button>
         </div>
       </nav>
 
@@ -330,34 +546,79 @@ export default function AdminDashboard() {
 
         {/* STATS & CONTENT (SAMA) */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6 z-10 relative">
+            <ScaleIn delay={0.1}>
             <div className="bg-[#0F0F0F] border border-[#222] p-6 rounded-2xl relative overflow-hidden">
                 <div className="flex justify-between items-start z-10 relative"><div><p className="text-gray-500 text-xs font-bold uppercase tracking-widest mb-1">PENDAPATAN ({currentDate.toLocaleDateString('id-ID', { month: 'short' })})</p><h3 className="text-3xl font-bold text-white">{formatRupiah(stats.revenue)}</h3></div><div className="p-3 bg-[#1A1A1A] rounded-xl text-green-500"><DollarSign size={24} /></div></div>
                 <div className="absolute bottom-0 left-0 right-0 h-12 bg-linear-to-t from-green-500/10 to-transparent"></div>
             </div>
+            </ScaleIn>
+            <ScaleIn delay={0.2}>
             <div className="bg-[#0F0F0F] border border-[#222] p-6 rounded-2xl relative overflow-hidden"><div className="flex justify-between items-start z-10 relative"><div><p className="text-gray-500 text-xs font-bold uppercase tracking-widest mb-1">BUTUH APPROVAL</p><h3 className="text-3xl font-bold text-white">{stats.pending}</h3></div><div className="p-3 bg-[#1A1A1A] rounded-xl text-yellow-500"><Bell size={24} /></div></div></div>
+            </ScaleIn>
+            <ScaleIn delay={0.3}>
             <div className="bg-[#0F0F0F] border border-[#222] p-6 rounded-2xl relative overflow-hidden"><div className="flex justify-between items-start z-10 relative"><div><p className="text-gray-500 text-xs font-bold uppercase tracking-widest mb-1">MEMBER AKTIF</p><h3 className="text-3xl font-bold text-white">{stats.members}</h3></div><div className="p-3 bg-[#1A1A1A] rounded-xl text-indigo-500"><Users size={24} /></div></div></div>
+            </ScaleIn>
         </div>
+
+        {/* TAB 0: ANALYTICS */}
+        {activeTab === 'analytics' && (
+            <FadeIn className="space-y-8 z-10 relative">
+                {loading || !analyticsData ? (
+                    <div className="flex justify-center py-20">
+                        <Loader2 className="animate-spin text-indigo-500 w-10 h-10" />
+                    </div>
+                ) : (
+                    <>
+                        <SlideIn delay={0.1}>
+                            <div className="flex items-center justify-between">
+                                <h2 className="text-2xl font-bold text-white flex items-center gap-3">
+                                    <span className="w-2 h-8 bg-indigo-600 rounded-full"></span>
+                                    Dashboard Analytics
+                                </h2>
+                                <div className="text-sm text-gray-400">
+                                    Data hingga: <span className="text-white font-bold">{currentDate.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })}</span>
+                                </div>
+                            </div>
+                        </SlideIn>
+
+                        <ScrollReveal>
+                            <DashboardAnalytics data={analyticsData} />
+                        </ScrollReveal>
+
+                        {expiringMembers.length > 0 && (
+                            <ScrollReveal>
+                                <ExpiringMembers members={expiringMembers} onExtend={handleQuickExtend} />
+                            </ScrollReveal>
+                        )}
+                    </>
+                )}
+            </FadeIn>
+        )}
 
         {/* TAB 1: OVERVIEW */}
         {activeTab === 'overview' && (
-            <div className="space-y-6 animate-in fade-in duration-500 z-10 relative">
+            <FadeIn className="space-y-6 z-10 relative">
+                <SlideIn delay={0.1}>
                 <h2 className="text-2xl font-bold text-white flex items-center gap-3"><span className="w-2 h-8 bg-yellow-500 rounded-full"></span>Permintaan Approval</h2>
+                </SlideIn>
                 {loading ? <div className="flex justify-center py-10"><Loader2 className="animate-spin text-indigo-500 w-8 h-8" /></div> : 
-                transactions.length === 0 ? (<div className="text-center py-20 border border-dashed border-[#222] rounded-2xl bg-[#0A0A0A]"><CheckCircle className="w-12 h-12 text-gray-600 mx-auto mb-4" /><p className="text-gray-500">Tidak ada transaksi pending bulan ini.</p></div>) : (
-                    <div className="grid gap-4">{transactions.map((trx) => (<div key={trx.id} className="bg-[#0F0F0F] border border-[#222] p-6 rounded-2xl flex flex-col md:flex-row items-center justify-between gap-6"><div className="flex items-center gap-4 w-full md:w-1/3"><div className="w-12 h-12 rounded-full bg-indigo-900/20 flex items-center justify-center text-indigo-400 font-bold text-lg border border-indigo-500/20">{trx.profiles?.name?.charAt(0) || '?'}</div><div><h4 className="font-bold text-white text-lg">{trx.profiles?.name}</h4><p className="text-gray-500 text-xs mt-1"><CalendarIcon size={12} className="inline mr-1"/> {new Date(trx.created_at).toLocaleString('id-ID')}</p></div></div><div className="w-full md:w-1/3"><div className="bg-[#151515] px-4 py-2 rounded-lg border border-[#222] inline-block"><p className="font-bold text-white text-sm">{trx.plans?.name}</p><p className="text-xs text-indigo-400 font-bold mt-0.5">{formatRupiah(trx.amount)}</p></div></div><div className="flex items-center gap-3 w-full md:w-auto justify-end"><button onClick={() => setSelectedProof(trx.proof_url)} className="p-3 bg-[#1A1A1A] hover:bg-[#252525] text-gray-300 rounded-xl border border-[#333] transition-colors"><Eye size={20} /></button><button onClick={() => handleReject(trx.id)} disabled={processingId === trx.id} className="px-4 py-2.5 bg-red-900/10 text-red-500 hover:bg-red-900/20 border border-red-900/30 rounded-xl font-bold text-sm flex items-center gap-2">{processingId === trx.id ? <Loader2 className="animate-spin w-4 h-4" /> : <XCircle size={18} />} Tolak</button><button onClick={() => handleApprove(trx.id)} disabled={processingId === trx.id} className="px-6 py-2.5 bg-indigo-600 text-white hover:bg-indigo-500 rounded-xl font-bold text-sm shadow-lg shadow-indigo-600/20 flex items-center gap-2">{processingId === trx.id ? <Loader2 className="animate-spin w-4 h-4" /> : <CheckCircle size={18} />} Setujui</button></div></div>))}</div>
+                transactions.length === 0 ? (<FadeIn delay={0.2}><div className="text-center py-20 border border-dashed border-[#222] rounded-2xl bg-[#0A0A0A]"><CheckCircle className="w-12 h-12 text-gray-600 mx-auto mb-4" /><p className="text-gray-500">Tidak ada transaksi pending bulan ini.</p></div></FadeIn>) : (
+                    <div className="grid gap-4">{transactions.map((trx, idx) => (<FadeIn key={trx.id} delay={0.1 + idx * 0.05}><div className="bg-[#0F0F0F] border border-[#222] p-6 rounded-2xl flex flex-col md:flex-row items-center justify-between gap-6"><div className="flex items-center gap-4 w-full md:w-1/3"><div className="w-12 h-12 rounded-full bg-indigo-900/20 flex items-center justify-center text-indigo-400 font-bold text-lg border border-indigo-500/20">{trx.profiles?.name?.charAt(0) || '?'}</div><div><h4 className="font-bold text-white text-lg">{trx.profiles?.name}</h4><p className="text-gray-500 text-xs mt-1"><CalendarIcon size={12} className="inline mr-1"/> {new Date(trx.created_at).toLocaleString('id-ID')}</p></div></div><div className="w-full md:w-1/3"><div className="bg-[#151515] px-4 py-2 rounded-lg border border-[#222] inline-block"><p className="font-bold text-white text-sm">{trx.plans?.name}</p><p className="text-xs text-indigo-400 font-bold mt-0.5">{formatRupiah(trx.amount)}</p></div></div><div className="flex items-center gap-3 w-full md:w-auto justify-end"><button onClick={() => setSelectedProof(trx.proof_url)} className="p-3 bg-[#1A1A1A] hover:bg-[#252525] text-gray-300 rounded-xl border border-[#333] transition-colors"><Eye size={20} /></button><button onClick={() => handleReject(trx.id)} disabled={processingId === trx.id} className="px-4 py-2.5 bg-red-900/10 text-red-500 hover:bg-red-900/20 border border-red-900/30 rounded-xl font-bold text-sm flex items-center gap-2">{processingId === trx.id ? <Loader2 className="animate-spin w-4 h-4" /> : <XCircle size={18} />} Tolak</button><button onClick={() => handleApprove(trx.id)} disabled={processingId === trx.id} className="px-6 py-2.5 bg-indigo-600 text-white hover:bg-indigo-500 rounded-xl font-bold text-sm shadow-lg shadow-indigo-600/20 flex items-center gap-2">{processingId === trx.id ? <Loader2 className="animate-spin w-4 h-4" /> : <CheckCircle size={18} />} Setujui</button></div></div></FadeIn>))}</div>
                 )}
-            </div>
+            </FadeIn>
         )}
 
         {/* TAB 2: MEMBERS */}
         {activeTab === 'members' && (
-            <div className="space-y-6 animate-in fade-in duration-500 z-10 relative">
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <FadeIn className="space-y-6 z-10 relative">
+                <SlideIn delay={0.1} className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                     <div className="flex items-center gap-3"><h2 className="text-2xl font-bold text-white flex items-center gap-3"><span className="w-2 h-8 bg-indigo-600 rounded-full"></span>Daftar Member</h2><div className="bg-[#111] p-1 rounded-lg border border-[#222] flex"><button onClick={() => setMemberFilter('all')} className={`px-3 py-1 text-xs font-bold rounded-md ${memberFilter === 'all' ? 'bg-[#333] text-white' : 'text-gray-500'}`}>Semua</button><button onClick={() => setMemberFilter('active')} className={`px-3 py-1 text-xs font-bold rounded-md ${memberFilter === 'active' ? 'bg-green-900/30 text-green-500' : 'text-gray-500'}`}>Aktif</button><button onClick={() => setMemberFilter('inactive')} className={`px-3 py-1 text-xs font-bold rounded-md ${memberFilter === 'inactive' ? 'bg-red-900/30 text-red-500' : 'text-gray-500'}`}>Non-Aktif</button></div></div>
                     <div className="flex gap-2 w-full md:w-auto"><div className="relative w-full md:w-64"><input type="text" placeholder="Cari nama/email..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full bg-[#0F0F0F] border border-[#222] rounded-full py-2 pl-10 pr-4 text-sm focus:outline-none focus:border-indigo-500 text-gray-300" suppressHydrationWarning={true} /><Search className="absolute left-3 top-2.5 text-gray-500 w-4 h-4" /></div><button onClick={() => setIsAddingMember(true)} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-full font-bold text-sm flex items-center gap-2 shadow-lg shadow-indigo-500/20"><PlusCircle size={18} /> Tambah</button></div>
-                </div>
+                </SlideIn>
+                <ScrollReveal>
                 <div className="bg-[#0F0F0F] border border-[#222] rounded-2xl overflow-hidden"><div className="overflow-x-auto"><table className="w-full text-left text-sm text-gray-400"><thead className="bg-[#151515] text-gray-200 font-bold uppercase text-xs"><tr><th className="p-4">Nama Member</th><th className="p-4">Status</th><th className="p-4">Expired Date</th><th className="p-4 text-right">Aksi</th></tr></thead><tbody className="divide-y divide-[#222]">{filteredMembers.map((m) => (<tr key={m.id} className="hover:bg-[#1A1A1A] transition-colors"><td className="p-4"><div className="font-bold text-white">{m.name || 'Tanpa Nama'}</div><div className="text-xs">{m.email}</div></td><td className="p-4">{m.is_active ? <span className="bg-green-500/10 text-green-500 px-2 py-1 rounded text-xs font-bold">AKTIF</span> : <span className="bg-red-500/10 text-red-500 px-2 py-1 rounded text-xs font-bold">NON-AKTIF</span>}</td><td className="p-4 font-mono text-white">{formatIndoDate(m.expired_at)}</td><td className="p-4 text-right"><div className="flex justify-end gap-2"><button onClick={() => setExtendingMember(m)} className="p-2 bg-[#222] hover:bg-green-600 hover:text-white rounded-lg text-gray-400" title="Perpanjang"><DollarSign size={16} /></button><button onClick={() => setEditingMember(m)} className="p-2 bg-[#222] hover:bg-indigo-600 hover:text-white rounded-lg text-gray-400" title="Edit Profil"><Edit size={16} /></button><button onClick={() => handleDeleteMember(m.id)} className="p-2 bg-[#222] hover:bg-red-600 hover:text-white rounded-lg text-gray-400" title="Hapus"><Trash2 size={16} /></button></div></td></tr>))}</tbody></table></div></div>
-            </div>
+                </ScrollReveal>
+            </FadeIn>
         )}
       </main>
 
@@ -365,7 +626,8 @@ export default function AdminDashboard() {
       {isAddingMember && (
         <div className="fixed inset-0 z-100 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
             {/* ... Isi Modal Tambah Member ... */}
-            <div className="bg-[#111] w-full max-w-md rounded-2xl border border-[#333] p-6 shadow-2xl animate-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto">
+            <ScaleIn>
+            <div className="bg-[#111] w-full max-w-md rounded-2xl border border-[#333] p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
                 <h3 className="text-xl font-bold text-white mb-1">Tambah Member Baru</h3>
                 <p className="text-gray-500 text-sm mb-6">Buat akun member secara manual</p>
                 <form action={handleCreateMember} className="space-y-4">
@@ -382,11 +644,13 @@ export default function AdminDashboard() {
                     <div className="flex gap-3 pt-4"><button type="button" onClick={() => setIsAddingMember(false)} className="flex-1 py-3 bg-[#1A1A1A] text-gray-400 rounded-xl font-bold hover:bg-[#222]">Batal</button><button type="submit" className="flex-1 py-3 bg-purple-600 text-white rounded-xl font-bold hover:bg-purple-500">Buat & Bayar</button></div>
                 </form>
             </div>
+            </ScaleIn>
         </div>
       )}
       {editingMember && (
         <div className="fixed inset-0 z-100 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
             {/* ... Isi Modal Edit Member ... */}
+            <ScaleIn>
             <div className="bg-[#111] w-full max-w-md rounded-2xl border border-[#333] p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
                 <h3 className="text-xl font-bold text-white mb-4">Edit Data / Perpanjang</h3>
                 <form action={handleUpdateMemberFull} className="space-y-4">
@@ -408,11 +672,13 @@ export default function AdminDashboard() {
                     <div className="flex gap-3 pt-4"><button type="button" onClick={() => setEditingMember(null)} className="flex-1 py-3 bg-[#222] text-white rounded-xl">Batal</button><button type="submit" className="flex-1 py-3 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-500">Simpan Perubahan</button></div>
                 </form>
             </div>
+            </ScaleIn>
         </div>
       )}
       {extendingMember && (
         <div className="fixed inset-0 z-100 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
             {/* ... Isi Modal Extend Manual ... */}
+            <ScaleIn>
             <div className="bg-[#111] w-full max-w-md rounded-2xl border border-[#333] p-6 shadow-2xl">
                 <h3 className="text-xl font-bold text-white mb-1">Perpanjang Membership</h3>
                 <p className="text-gray-500 text-sm mb-6">Member: <span className="text-indigo-400">{extendingMember.name}</span></p>
@@ -422,6 +688,7 @@ export default function AdminDashboard() {
                     <div className="flex gap-3 pt-4"><button type="button" onClick={() => setExtendingMember(null)} className="flex-1 py-3 bg-[#222] text-white rounded-xl">Batal</button><button type="submit" className="flex-1 py-3 bg-green-600 text-white rounded-xl font-bold hover:bg-green-500">Bayar & Aktifkan</button></div>
                 </form>
             </div>
+            </ScaleIn>
         </div>
       )}
       {selectedProof && (
