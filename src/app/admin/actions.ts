@@ -131,7 +131,7 @@ export async function createMember(formData: FormData) {
 export async function updateMemberFull(formData: FormData) {
   const supabase = getAdminClient()
 
-  const userId = formData.get('member_id') as string
+  const userId = formData.get('userId') as string
   const name = formData.get('name') as string
   const phone = formData.get('phone_number') as string
   

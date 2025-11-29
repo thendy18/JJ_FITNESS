@@ -6,6 +6,8 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { Eye, EyeOff, Loader2 } from 'lucide-react'
+import { FadeIn, SlideIn } from '@/components/AnimatedSection'
+import { toast } from 'sonner'
 
 export default function SignUpPage() {
   const router = useRouter()
@@ -60,8 +62,8 @@ export default function SignUpPage() {
 
       if (error) throw error
 
-      alert('Registrasi Berhasil! Silakan login.')
-      router.push('/login')
+      toast.success('✅ Registrasi Berhasil! Silakan login.')
+      setTimeout(() => router.push('/login'), 1500)
       
     } catch (err: any) {
       setErrorMsg(err.message || 'Terjadi kesalahan saat mendaftar.')
@@ -75,25 +77,26 @@ export default function SignUpPage() {
     <div className="flex min-h-screen items-center justify-center bg-black px-4 py-12">
       
       {/* 2. KARTU FORM: Abu Sangat Gelap (bg-gray-900) + Border Tipis */}
-      <div className="w-full max-w-md space-y-8 bg-[#000000] p-8 rounded-2xl shadow-2xl shadow-indigo-500/10 border border-gray-800">
+      <FadeIn className="w-full max-w-md space-y-8 bg-[#000000] p-8 rounded-2xl shadow-2xl shadow-indigo-500/10 border border-gray-800">
         
-        <div className="text-center space-y-2">
+        <SlideIn delay={0.2} className="text-center space-y-2">
           <h2 className="text-4xl font-extrabold text-white tracking-tight">
             Sign Up
           </h2>
           <p className="text-gray-400 text-sm">
             Take the first step toward a stronger, healthier you </p>
-        </div>
+        </SlideIn>
 
         {errorMsg && (
-          <div className="p-4 text-sm text-red-200 bg-red-900/20 border border-red-900 rounded-xl flex items-center gap-2 animate-pulse">
+          <FadeIn className="p-4 text-sm text-red-200 bg-red-900/20 border border-red-900 rounded-xl flex items-center gap-2 animate-pulse">
             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
               <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
             </svg>
             {errorMsg}
-          </div>
+          </FadeIn>
         )}
 
+        <FadeIn delay={0.4}>
         <form onSubmit={handleSignUp} className="space-y-5">
           
           {/* Nama Lengkap */}
@@ -190,7 +193,8 @@ export default function SignUpPage() {
             </Link>
           </p>
         </form>
-      </div>
+        </FadeIn>
+      </FadeIn>
     </div>
   )
 }
