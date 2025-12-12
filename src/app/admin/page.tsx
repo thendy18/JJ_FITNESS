@@ -240,23 +240,81 @@ export default function AdminDashboard() {
     setExpiringMembers(membersWithDays)
   }
 
-  const updateExpiredMembersStatus = async () => {
-    const today = new Date().toISOString()
+  const updateExpiredMembersStatus = async (showToast = false) => {
+    const today = new Date()
+    const todayISO = today.toISOString()
     
-    // Update member yang sudah expired jadi is_active = false
-    const { error } = await supabase
+    console.log('🔄 Auto-checking expired members at:', todayISO)
+    
+    // Cek dulu member yang expired
+    const { data: expiredMembers } = await supabase
       .schema('members')
       .from('profiles')
-      .update({ is_active: false })
-      .lt('expired_at', today)
+      .select('id, name, expired_at, is_active')
+      .lt('expired_at', todayISO)
       .eq('is_active', true)
+    
+    if (expiredMembers && expiredMembers.length > 0) {
+      console.log('📋 Found expired members:', expiredMembers.map(m => m.name))
+      
+      // Update member yang sudah expired jadi is_active = false
+      const { error, data } = await supabase
+        .schema('members')
+        .from('profiles')
+        .update({ 
+          is_active: false,
+          updated_at: todayISO
+        })
+        .lt('expired_at', todayISO)
+        .eq('is_active', true)
+        .select()
 
-    if (error) {
-      console.error('Error updating expired members:', error)
+      if (error) {
+        console.error('❌ Error updating expired members:', error)
+      } else {
+        console.log('✅ Successfully updated expired members:', data?.length || 0)
+        if (showToast && data && data.length > 0) {
+          toast.success(`✅ ${data.length} member expired diupdate statusnya`)
+        }
+        return data?.length || 0
+      }
+    } else {
+      console.log('✅ No expired members found')
     }
+    return 0
   }
 
   useEffect(() => { fetchData() }, [currentDate])
+
+  // Auto-update expired members setiap ganti tab
+  useEffect(() => {
+    if (activeTab === 'members') {
+      updateExpiredMembersStatus().then(() => {
+        // Refresh data setelah update status
+        setTimeout(() => {
+          const fetchMembersOnly = async () => {
+            const { data: memberData } = await supabase.schema('members').from('profiles').select('*').order('created_at', { ascending: false })
+            if (memberData) setMembers(memberData as any)
+          }
+          fetchMembersOnly()
+        }, 500)
+      })
+    }
+  }, [activeTab])
+
+  // Auto-update expired members setiap 30 detik (background)
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      await updateExpiredMembersStatus()
+      // Refresh members data jika sedang di tab members
+      if (activeTab === 'members') {
+        const { data: memberData } = await supabase.schema('members').from('profiles').select('*').order('created_at', { ascending: false })
+        if (memberData) setMembers(memberData as any)
+      }
+    }, 30000) // 30 detik
+
+    return () => clearInterval(interval)
+  }, [activeTab])
 
   // --- LOGIKA PICKER TANGGAL ---
   const togglePicker = () => {
@@ -653,7 +711,7 @@ export default function AdminDashboard() {
             <FadeIn className="space-y-6 z-10 relative">
                 <SlideIn delay={0.1} className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                     <div className="flex items-center gap-3"><h2 className="text-2xl font-bold text-white flex items-center gap-3"><span className="w-2 h-8 bg-indigo-600 rounded-full"></span>Daftar Member</h2><div className="bg-[#111] p-1 rounded-lg border border-[#222] flex"><button onClick={() => setMemberFilter('all')} className={`px-3 py-1 text-xs font-bold rounded-md ${memberFilter === 'all' ? 'bg-[#333] text-white' : 'text-gray-500'}`}>Semua</button><button onClick={() => setMemberFilter('active')} className={`px-3 py-1 text-xs font-bold rounded-md ${memberFilter === 'active' ? 'bg-green-900/30 text-green-500' : 'text-gray-500'}`}>Aktif</button><button onClick={() => setMemberFilter('inactive')} className={`px-3 py-1 text-xs font-bold rounded-md ${memberFilter === 'inactive' ? 'bg-red-900/30 text-red-500' : 'text-gray-500'}`}>Non-Aktif</button></div></div>
-                    <div className="flex gap-2 w-full md:w-auto"><div className="relative w-full md:w-64"><input type="text" placeholder="Cari nama/email..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full bg-[#0F0F0F] border border-[#222] rounded-full py-2 pl-10 pr-4 text-sm focus:outline-none focus:border-indigo-500 text-gray-300" suppressHydrationWarning={true} /><Search className="absolute left-3 top-2.5 text-gray-500 w-4 h-4" /></div><button onClick={() => setIsAddingMember(true)} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-full font-bold text-sm flex items-center gap-2 shadow-lg shadow-indigo-500/20"><PlusCircle size={18} /> Tambah</button></div>
+                    <div className="flex gap-2 w-full md:w-auto"><div className="relative w-full md:w-64"><input type="text" placeholder="Cari nama/email..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full bg-[#0F0F0F] border border-[#222] rounded-full py-2 pl-10 pr-4 text-sm focus:outline-none focus:border-indigo-500 text-gray-300" suppressHydrationWarning={true} /><Search className="absolute left-3 top-2.5 text-gray-500 w-4 h-4" /></div><button onClick={async () => { await updateExpiredMembersStatus(true); setTimeout(() => fetchData(), 1000); }} disabled={loading} className="px-3 py-2 bg-orange-600 hover:bg-orange-500 text-white rounded-full font-bold text-sm flex items-center gap-2" title="Manual Update Status Expired"><span className="text-xs">🔄</span><span className="hidden md:inline">Force Update</span></button><button onClick={() => setIsAddingMember(true)} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-full font-bold text-sm flex items-center gap-2 shadow-lg shadow-indigo-500/20"><PlusCircle size={18} /> Tambah</button></div>
                 </SlideIn>
                 <ScrollReveal>
                 <div className="bg-[#0F0F0F] border border-[#222] rounded-2xl overflow-hidden"><div className="overflow-x-auto"><table className="w-full text-left text-sm text-gray-400"><thead className="bg-[#151515] text-gray-200 font-bold uppercase text-xs"><tr><th className="p-4">Nama Member</th><th className="p-4">Status</th><th className="p-4">Expired Date</th><th className="p-4 text-right">Aksi</th></tr></thead><tbody className="divide-y divide-[#222]">{filteredMembers.map((m) => (<tr key={m.id} className="hover:bg-[#1A1A1A] transition-colors"><td className="p-4"><div className="font-bold text-white">{m.name || 'Tanpa Nama'}</div><div className="text-xs">{m.email}</div></td><td className="p-4">{m.is_active ? <span className="bg-green-500/10 text-green-500 px-2 py-1 rounded text-xs font-bold">AKTIF</span> : <span className="bg-red-500/10 text-red-500 px-2 py-1 rounded text-xs font-bold">NON-AKTIF</span>}</td><td className="p-4 font-mono text-white">{formatIndoDate(m.expired_at)}</td><td className="p-4 text-right"><div className="flex justify-end gap-2"><button onClick={() => setExtendingMember(m)} className="p-2 bg-[#222] hover:bg-green-600 hover:text-white rounded-lg text-gray-400" title="Perpanjang"><DollarSign size={16} /></button><button onClick={() => setEditingMember(m)} className="p-2 bg-[#222] hover:bg-indigo-600 hover:text-white rounded-lg text-gray-400" title="Edit Profil"><Edit size={16} /></button><button onClick={() => handleDeleteMember(m.id)} className="p-2 bg-[#222] hover:bg-red-600 hover:text-white rounded-lg text-gray-400" title="Hapus"><Trash2 size={16} /></button></div></td></tr>))}</tbody></table></div></div>
