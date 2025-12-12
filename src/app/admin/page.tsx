@@ -125,18 +125,21 @@ export default function AdminDashboard() {
         })
     }
 
-    // 2. Members
+    // 2. Auto-update expired members status
+    await updateExpiredMembersStatus()
+
+    // 3. Members
     const { data: memberData } = await supabase.schema('members').from('profiles').select('*').order('created_at', { ascending: false })
     if (memberData) setMembers(memberData as any)
 
-    // 3. Plans
+    // 4. Plans
     const { data: plansData } = await supabase.schema('members').from('plans').select('*').eq('is_active', true)
     if (plansData) setAvailablePlans(plansData)
 
-    // 4. Analytics Data (6 bulan terakhir)
+    // 5. Analytics Data (6 bulan terakhir)
     await fetchAnalyticsData()
 
-    // 5. Expiring Members (5 hari ke depan)
+    // 6. Expiring Members (5 hari ke depan)
     await fetchExpiringMembers()
 
     setLoading(false)
@@ -235,6 +238,22 @@ export default function AdminDashboard() {
     })) || []
 
     setExpiringMembers(membersWithDays)
+  }
+
+  const updateExpiredMembersStatus = async () => {
+    const today = new Date().toISOString()
+    
+    // Update member yang sudah expired jadi is_active = false
+    const { error } = await supabase
+      .schema('members')
+      .from('profiles')
+      .update({ is_active: false })
+      .lt('expired_at', today)
+      .eq('is_active', true)
+
+    if (error) {
+      console.error('Error updating expired members:', error)
+    }
   }
 
   useEffect(() => { fetchData() }, [currentDate])
@@ -367,7 +386,7 @@ export default function AdminDashboard() {
         success: (result) => {
           if (result?.error) throw new Error(result.error)
           setEditingMember(null)
-          fetchData()
+          fetchData() // Refresh data termasuk expiring members
           return '✅ Data member berhasil diupdate!'
         },
         error: (err) => `Gagal: ${err.message}`
@@ -400,7 +419,7 @@ export default function AdminDashboard() {
           if (result?.error) throw new Error(result.error)
           setExtendingMember(null)
           setManualPrice(0)
-          fetchData()
+          fetchData() // Ini akan refresh semua data termasuk expiring members
           return '💰 Membership berhasil diperpanjang!'
         },
         error: (err) => err.message || 'Gagal perpanjang membership'
@@ -575,8 +594,19 @@ export default function AdminDashboard() {
                                     <span className="w-2 h-8 bg-indigo-600 rounded-full"></span>
                                     Dashboard Analytics
                                 </h2>
-                                <div className="text-sm text-gray-400">
-                                    Data hingga: <span className="text-white font-bold">{currentDate.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })}</span>
+                                <div className="flex items-center gap-4">
+                                    <button 
+                                        onClick={() => fetchData()}
+                                        disabled={loading}
+                                        className="px-3 py-2 bg-[#111] hover:bg-[#222] border border-[#333] rounded-lg text-gray-400 hover:text-white transition-all text-sm flex items-center gap-2"
+                                        title="Refresh data"
+                                    >
+                                        {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : '🔄'}
+                                        <span className="hidden md:inline">Refresh</span>
+                                    </button>
+                                    <div className="text-sm text-gray-400">
+                                        Data hingga: <span className="text-white font-bold">{currentDate.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })}</span>
+                                    </div>
                                 </div>
                             </div>
                         </SlideIn>
@@ -585,9 +615,19 @@ export default function AdminDashboard() {
                             <DashboardAnalytics data={analyticsData} />
                         </ScrollReveal>
 
-                        {expiringMembers.length > 0 && (
+                        {expiringMembers.length > 0 ? (
                             <ScrollReveal>
                                 <ExpiringMembers members={expiringMembers} onExtend={handleQuickExtend} />
+                            </ScrollReveal>
+                        ) : (
+                            <ScrollReveal>
+                                <div className="bg-[#0F0F0F] border border-[#222] rounded-2xl p-8 text-center">
+                                    <div className="w-16 h-16 bg-green-500/10 rounded-full flex items-center justify-center mx-auto mb-4">
+                                        <CheckCircle className="w-8 h-8 text-green-500" />
+                                    </div>
+                                    <h3 className="text-lg font-bold text-white mb-2">Semua Member Aman! 🎉</h3>
+                                    <p className="text-gray-500">Tidak ada member yang akan expired dalam 5 hari ke depan</p>
+                                </div>
                             </ScrollReveal>
                         )}
                     </>
