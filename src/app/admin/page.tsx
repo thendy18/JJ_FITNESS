@@ -1,3 +1,4 @@
+// Trigger Vercel Deploy
 'use client'
 
 import { createClient } from '@/lib/supabase/client'
